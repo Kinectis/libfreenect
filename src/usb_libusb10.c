@@ -33,8 +33,8 @@
 #include "loader.h"
 
 #ifdef _MSC_VER
-	# define sleep(x) Sleep((x)*1000) 
-#endif 
+	# define sleep(x) Sleep((x)*1000)
+#endif
 
 
 FN_INTERNAL int fnusb_num_devices(freenect_context *ctx)
@@ -86,6 +86,9 @@ FN_INTERNAL libusb_device * fnusb_find_connected_audio_device(libusb_device * ca
 	if (cameraBusNo < 0) return NULL;
 	libusb_device * cameraParent = libusb_get_parent(camera);
 
+	struct libusb_device_descriptor camdesc;
+	int rc = libusb_get_device_descriptor (camera, &camdesc);
+
 	int i = 0;
 	for (i = 0; i < cnt; i++)
 	{
@@ -101,13 +104,14 @@ FN_INTERNAL libusb_device * fnusb_find_connected_audio_device(libusb_device * ca
 			// make sure its some type of Kinect audio device
 			if ((desc.idProduct == PID_NUI_AUDIO || fnusb_is_pid_k4w_audio(desc.idProduct)))
 			{
+
 				int audioBusNo = libusb_get_bus_number(deviceList[i]);
 				if (audioBusNo == cameraBusNo)
 				{
 					// we have a match!
 					// let's double check
 					libusb_device * audioParent = libusb_get_parent(deviceList[i]);
-					if (cameraParent == audioParent)
+					if (desc.idVendor == camdesc.idVendor)
 					{
 						return deviceList[i];
 					}
@@ -315,7 +319,7 @@ FN_INTERNAL int fnusb_open_subdevices(freenect_device *dev, int index)
 
 	dev->device_does_motor_control_with_audio = 0;
 	dev->motor_control_with_audio_enabled = 0;
-    
+
 	dev->usb_cam.parent = dev;
 	dev->usb_cam.dev = NULL;
 	dev->usb_motor.parent = dev;
@@ -328,6 +332,12 @@ FN_INTERNAL int fnusb_open_subdevices(freenect_device *dev, int index)
 	if (cnt < 0)
 		return -1;
 
+
+	if (cnt == 0)
+	{
+		FN_ERROR("There's only one");
+	}
+
 	int i = 0, nr_cam = 0;
 
 	int res;
@@ -338,6 +348,11 @@ FN_INTERNAL int fnusb_open_subdevices(freenect_device *dev, int index)
 		int r = libusb_get_device_descriptor (devs[i], &desc);
 		if (r < 0)
 			continue;
+
+		int rc = 0;
+		rc = libusb_get_device_descriptor(devs[i], &desc);
+
+		FN_ERROR("Vendor:Device = %04x:%04x\n", desc.idVendor, desc.idProduct);
 
 		if (desc.idVendor != VID_MICROSOFT)
 			continue;
@@ -359,13 +374,23 @@ FN_INTERNAL int fnusb_open_subdevices(freenect_device *dev, int index)
 					break;
 				}
 
+				libusb_device * camera = libusb_get_device( dev->usb_cam.dev );
+				libusb_device * cameraParent = libusb_get_parent(camera);
+
+				if (cameraParent != NULL)
+				{
+					int rc = 0;
+					rc = libusb_get_device_descriptor(cameraParent, &desc);
+					FN_ERROR("Vendor:Device = %04x:%04x\n", desc.idVendor, desc.idProduct);
+				}
+
 				if (desc.idProduct == PID_K4W_CAMERA || desc.bcdDevice != fn_le32(267))
 				{
 					freenect_device_flags requested_devices = ctx->enabled_subdevices;
-        
+
 					// Not the 1414 kinect so remove the motor flag, this should preserve the audio flag if set
 					ctx->enabled_subdevices = (freenect_device_flags)(ctx->enabled_subdevices & ~FREENECT_DEVICE_MOTOR);
-					
+
 					ctx->zero_plane_res = 334;
 					dev->device_does_motor_control_with_audio = 1;
 
@@ -430,37 +455,42 @@ FN_INTERNAL int fnusb_open_subdevices(freenect_device *dev, int index)
 			}
 		}
 	}
-	
+
 	if (ctx->enabled_subdevices == FREENECT_DEVICE_CAMERA || res < 0)
 		cnt = 0;
-	
+
     //FIND MOTOR BASED ON PARENT HUB
     if( (ctx->enabled_subdevices & FREENECT_DEVICE_MOTOR) && dev->usb_cam.dev != NULL )
     {
-        
         libusb_device * camera = libusb_get_device( dev->usb_cam.dev );
-        libusb_device * cameraParent = libusb_get_parent( camera );
-        
-        if( cameraParent != NULL )
+				libusb_device * cameraParent = libusb_get_parent( libusb_get_device( dev->usb_cam.dev ) );
+
+				struct libusb_device_descriptor cam;
+				int r = libusb_get_device_descriptor (camera, &cam);
+
+				if( r >= 0 )
+        //if( cameraParent != NULL )
         {
 
             for(i = 0; i < cnt; i++)
             {
-            
+
+							int r = libusb_get_device_descriptor (devs[i], &desc);
+							if (r < 0)
+								continue;
                 // Match audio based on camera parent
-                if( cameraParent == libusb_get_parent(devs[i]) )
+								if(cam.idVendor == desc.idVendor)
+                //if( cameraParent == libusb_get_parent(devs[i]) )
                 {
-                    
-		int r = libusb_get_device_descriptor (devs[i], &desc);
-		if (r < 0)
-			continue;
+									FN_ERROR("Possible motor matched");
 
 		if (desc.idVendor != VID_MICROSOFT)
 			continue;
-                    
+
                     // This has to be the device we are looking for as it is a Kinect motor device with the same parent as the camera
                     if ( !dev->usb_motor.dev && desc.idProduct == PID_NUI_MOTOR)
 			{
+				FN_ERROR("Motor matched.");
 				dev->usb_motor.VID = desc.idVendor;
 				dev->usb_motor.PID = desc.idProduct;
 
@@ -479,7 +509,7 @@ FN_INTERNAL int fnusb_open_subdevices(freenect_device *dev, int index)
 					dev->usb_motor.dev = NULL;
 					break;
 				}
-                        
+
                         // This has to be the device we need, as it is matched by parent - so don't try any others
                         break;
                     }
@@ -487,25 +517,35 @@ FN_INTERNAL int fnusb_open_subdevices(freenect_device *dev, int index)
             }
         }
     }
-    
+
     // FIND AUDIO BASED ON PARENT HUB
     if( (ctx->enabled_subdevices & FREENECT_DEVICE_AUDIO) && dev->usb_cam.dev != NULL )
     {
-    
+
         libusb_device * camera = libusb_get_device( dev->usb_cam.dev );
         libusb_device * cameraParent = libusb_get_parent( camera );
-        
-        if( cameraParent != NULL )
+
+				if( cameraParent == NULL )
+				{
+					FN_ERROR("ohno");
+				}
+
+				struct libusb_device_descriptor cam;
+				int r = libusb_get_device_descriptor (camera, &cam);
+
+				if ( r >= 0 )
+        //if( cameraParent != NULL )
         {
 
             for(i = 0; i < cnt; i++)
             {
+							int r = libusb_get_device_descriptor (devs[i], &desc);
+							if (r < 0)
+									continue;
                 // Match audio based on camera parent
-                if( cameraParent == libusb_get_parent(devs[i]) )
+                if( cam.idVendor == desc.idVendor )
                 {
-                    int r = libusb_get_device_descriptor (devs[i], &desc);
-                    if (r < 0)
-                        continue;
+
 
                     if (desc.idVendor != VID_MICROSOFT)
                         continue;
@@ -540,7 +580,7 @@ FN_INTERNAL int fnusb_open_subdevices(freenect_device *dev, int index)
 				// waiting for a device with the same serial number to
 				// reappear.
 				int num_interfaces = fnusb_num_interfaces(&dev->usb_audio);
-                
+
 				if (num_interfaces >= 2)
 				{
 					if (dev->device_does_motor_control_with_audio)
@@ -559,9 +599,9 @@ FN_INTERNAL int fnusb_open_subdevices(freenect_device *dev, int index)
 						break;
 					}
 					char* audio_serial = strdup((char*)string_desc);
-                
+
 					FN_SPEW("Uploading firmware to audio device in bootloader state.\n");
-                    
+
 					// Check if we can load from memory - otherwise load from disk
 					if (desc.idProduct == PID_NUI_AUDIO && ctx->fn_fw_nui_ptr && ctx->fn_fw_nui_size > 0)
 					{
@@ -669,7 +709,7 @@ FN_INTERNAL int fnusb_open_subdevices(freenect_device *dev, int index)
 					}
 					free(audio_serial);
 				}
-                    
+
                         // This has to be the device we need, as it is matched by parent - so don't try any others
                         break;
                     }
@@ -872,7 +912,9 @@ FN_INTERNAL int fnusb_start_iso(fnusb_dev *dev, fnusb_isoc_stream *strm, fnusb_i
 			libusb_fill_iso_transfer(strm->xfers[i], dev->dev, endpoint, bufp, pkts * len, pkts, iso_callback, strm, 0);
 			libusb_set_iso_packet_lengths(strm->xfers[i], len);
 
+			printf("%i\n", xfers);
 			int ret = libusb_submit_transfer(strm->xfers[i]);
+			printf("kek\n");
 			if (ret < 0)
 			{
 				FN_WARNING("Failed to submit isochronous transfer %d: %d\n", i, ret);

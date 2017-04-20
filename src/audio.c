@@ -156,6 +156,7 @@ int freenect_start_audio(freenect_device* dev) {
 	// Allocate buffers
 	dev->audio.audio_out_ring = (freenect_sample_51*)malloc(256 * sizeof(freenect_sample_51));
 	memset(dev->audio.audio_out_ring, 0, 256 * sizeof(freenect_sample_51));
+
 	dev->audio.cancelled_buffer = (int16_t*)malloc(256*sizeof(int16_t));
 	memset(dev->audio.cancelled_buffer, 0, 256*sizeof(int16_t));
 	int i;
@@ -175,12 +176,14 @@ int freenect_start_audio(freenect_device* dev) {
 	dev->audio.out_window_parity = 0;
 	dev->audio.in_window = 0;
 	dev->audio.in_counter = 0;
+
 	for(i = 0; i < 10; i++) {
 		dev->audio.last_seen_window[i] = 0;
 	}
-
+	
 	// Start isochronous streams
 	res = fnusb_start_iso(&dev->usb_audio, &dev->audio_in_isoc, iso_in_callback, 0x82, NUM_XFERS, PKTS_PER_XFER, 524);
+	printf("huh\n");
 	if (res < 0) {
 		FN_ERROR("audio: failed to start isochronous IN stream: %d\n", res);
 		return res;
@@ -224,7 +227,7 @@ int freenect_stop_audio(freenect_device* dev) {
 		free(dev->audio.cancelled_buffer);
 	if (dev->audio.in_unknown)
 		free(dev->audio.in_unknown);
-	
+
 	int i;
 	for (i = 0; i < 4; i++) {
 		if (dev->audio.mic_buffer[i])

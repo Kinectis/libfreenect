@@ -91,21 +91,34 @@ int main(int argc, char** argv) {
 		freenect_shutdown(f_ctx);
 		return 1;
 	}
+	printf("Device is open.\n");
 
 	capture state;
 	state.samples = 0;
+	printf("1\n");
 	state.logfiles[0] = fopen("channel1.wav", "wb");
+	printf("2\n");
 	state.logfiles[1] = fopen("channel2.wav", "wb");
+	printf("3\n");
 	state.logfiles[2] = fopen("channel3.wav", "wb");
+	printf("4\n");
 	state.logfiles[3] = fopen("channel4.wav", "wb");
+	printf("5\n");
 	fwrite(wavheader, 1, 44, state.logfiles[0]);
+	printf("6\n");
 	fwrite(wavheader, 1, 44, state.logfiles[1]);
+	printf("7\n");
 	fwrite(wavheader, 1, 44, state.logfiles[2]);
+	printf("8\n");
 	fwrite(wavheader, 1, 44, state.logfiles[3]);
+	printf("9\n");
 	freenect_set_user(f_dev, &state);
+	printf("10\n");
 
 	freenect_set_audio_in_callback(f_dev, in_callback);
+	printf("11\n");
 	freenect_start_audio(f_dev);
+	printf("12\n");
 	signal(SIGINT, cleanup);
 
 	while(!die && freenect_process_events(f_ctx) >= 0) {
